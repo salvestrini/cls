@@ -5,21 +5,6 @@
 //   http://dptnt.com/2010/03/smart-optical-slave-flash-trigger/
 //
 
-#include <Adafruit_GFX.h>
-#include <Adafruit_PCD8544.h>
-
-#define DISPLAY_SCLK 7 // Serial clock out    (SCLK)
-#define DISPLAY_DIN  6 // Serial data out     (DIN)
-#define DISPLAY_DC   5 // Data/command select (D/C)
-#define DISPLAY_CS   4 // LCD chip select     (CS)
-#define DISPLAY_RST  3 // LCD reset           (RST)
-
-Adafruit_PCD8544 display = Adafruit_PCD8544(DISPLAY_SCLK,
-                                            DISPLAY_DIN,
-                                            DISPLAY_DC,
-                                            DISPLAY_CS,
-                                            DISPLAY_RST);
-
 // Defines for setting and clearing register bits
 #ifndef cbi
 #define cbi(sfr, bit) (_SFR_BYTE(sfr) &= ~_BV(bit))
@@ -43,7 +28,7 @@ volatile unsigned long prev_pulse, time_passed;
 
 int ar0;              // Photodiode input
 int threshold;        // Pulse height threshold. DIP #2 off: 10, on: 5
-int mode;             // DIP #1 off: 1st pulse, on: first pulse
+int mode;             // DIP #1 off: 1st pulse, on: first pulse.
 int pulse_count;      // Pulse count
 int prev_pulse_count; // Pulses in previous pulse groups
 
@@ -85,31 +70,25 @@ void dip_config(int info)
 
 void setup()
 {
+        int start;
+
         Serial.begin(57600);
-
-        display.begin();
-        display.setContrast(50);
-        display.clearDisplay();
-
-        display.setTextSize(1);
-        display.setTextColor(BLACK);
-        display.setCursor(0, 0);
-        display.println("Hello world");
 
         // Use internal reference voltage of 1.2v for ADC
         analogReference(INTERNAL);
 
-        // Set prescale to 8 for much faster analog read
-        // 16MHz/8 = 2MHz ADC clock speed. Each ADC conversion takes 13 cycles
-        // So 2MHz/13 = 154KHz sampling rate
-        // With other overhead considered, each analogRead takes ~10 us
+        // Set prescale to 8 for much faster analog read.
+        // 16MHz/8 = 2MHz ADC clock speed. Each ADC conversion takes 13 cycles.
+        // So 2MHz/13 = 154KHz sampling rate.
+        // With other overhead considered, each analogRead takes ~10
+        // microseconds.
         cbi(ADCSRA, ADPS2);
         sbi(ADCSRA, ADPS1);
         sbi(ADCSRA, ADPS0);
 
         pinMode(PHOTODIODE, INPUT);
         pinMode(MODE,       INPUT);
-        digitalWrite(MODE, HIGH);        // Use the internal pull-up register
+        digitalWrite(MODE, HIGH); // Use the internal pull-up register
         pinMode(SENSITIVITY, INPUT);
         digitalWrite(SENSITIVITY, HIGH); // Use the internal pull-up register
         pinMode(XSYNC,  OUTPUT);
@@ -121,29 +100,28 @@ void setup()
         ar0 = analogRead(PHOTODIODE);
 
         dip_config(1);
-
-        Serial.println("Ready");
+        Serial.println("Trigger Ready.");
 }
 
 void loop()
 {
-        int           new_ar, delta;
+        int new_ar, delta;
         unsigned long now;
 
         new_ar = analogRead(PHOTODIODE);
         delta  = new_ar - ar0;
 
-        now         = hpticks();
+        now = hpticks();
         time_passed = now - prev_pulse;
 
         // Pulses come in bundles. The minimal seperation seems to be around
-        // 4000 us
+        // 4000 microseconds
         if (pulse_count > 0 && time_passed > 1000) {
                 prev_pulse_count = pulse_count;
                 pulse_count      = 0;
         }
 
-        // Reset if > 125000 * 4 = 500ms
+        // Reset if > 125000*4 = 500ms.
         if (time_passed > 125000) {
                 pulse_count = 0;
                 prev_pulse_count = 0;
@@ -182,18 +160,16 @@ void loop()
                         }
                 }
         } else {
-                // Background. It should be zero most of the time
+                // Background. It should be zero most of the time.
                 ar0 = new_ar;
         }
 
-        // Read the button status
+        // Read the button status.
         if (digitalRead(BUTTON) == HIGH) {
                 fire_flash();
                 pulse_count      = 0;
                 prev_pulse_count = 0;
                 dip_config(1);
-
-                // Avoid button contact problem so delay 300ms
-                delay(300);
+                delay(300); // Avoid button contact problem so delay 300ms
         }
 }
