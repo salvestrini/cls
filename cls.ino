@@ -20,6 +20,87 @@ Adafruit_PCD8544 display = Adafruit_PCD8544(DISPLAY_SCLK,
                                             DISPLAY_CS,
                                             DISPLAY_RST);
 
+// NOTE: virtual methods enlarge the binary size
+
+class bitmap {
+public:
+        bitmap(const uint8_t * buffer,
+               uint16_t        width,
+               uint16_t        height) :
+                buffer_(buffer),
+                width_(width),
+                height_(height)
+        { }
+
+        virtual ~bitmap()
+        { }
+
+        const uint8_t * buffer()  { return buffer_; }
+        uint16_t        width()   { return width_;  }
+        uint16_t        height()  { return height_; }
+
+private:
+        const uint8_t * buffer_;
+        uint16_t        width_;
+        uint16_t        height_;
+};
+
+class image : public bitmap {
+public:
+        image(uint16_t        x,
+              uint16_t        y, 
+              const uint8_t * buffer,
+              uint16_t        w,
+              uint16_t        h) :
+                x_(x), y_(y), bitmap(buffer, w, h)
+        { }
+
+        virtual ~image()
+        { }
+        
+        virtual void move(uint16_t x,
+                          uint16_t y)
+        { x_ = x; y_ = y; }
+
+        virtual void draw(uint16_t color)
+        { display.drawBitmap(x_, y_, buffer(), width(), height(), color); }
+
+private:
+        uint16_t x_;
+        uint16_t y_;
+};
+
+class icon : public image {
+public:
+        icon(uint16_t        x,
+             uint16_t        y, 
+             const uint8_t * buffer,
+             uint16_t        w,
+             uint16_t        h) :
+                image(x, y, buffer, w, h),
+                visible_(true)
+        { }
+
+        virtual ~icon()
+        { }
+
+        virtual bool visible() { return visible_;  }
+        virtual void hide()    { visible_ = false; }
+        virtual void show()    { visible_ = true;  }
+
+        virtual void draw() {
+                if (!visible_)
+                        return;
+                image::draw(1);
+        }
+
+private:
+        bool visible_;
+};
+
+icon battery(0, 0, NULL, 0, 0);
+icon group(battery.width(), 0, NULL, 0, 0);
+
 // Defines for setting and clearing register bits
 #ifndef cbi
 #define cbi(sfr, bit) (_SFR_BYTE(sfr) &= ~_BV(bit))
@@ -48,7 +129,7 @@ int pulse_count;      // Pulse count
 int prev_pulse_count; // Pulses in previous pulse groups
 
 // Each tick is 4 microsecond
-unsigned long hpticks (void)
+unsigned long hpticks()
 {
         return (timer0_overflow_count << 8) + TCNT0;
 }
