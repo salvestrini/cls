@@ -8,17 +8,20 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_PCD8544.h>
 
-#define DISPLAY_SCLK 7 // Serial clock out    (SCLK)
-#define DISPLAY_DIN  6 // Serial data out     (DIN)
-#define DISPLAY_DC   5 // Data/command select (D/C)
-#define DISPLAY_CS   4 // LCD chip select     (CS)
-#define DISPLAY_RST  3 // LCD reset           (RST)
+#define PIN_PHOTODIODE  0
+#define PIN_XSYNC       7
 
-Adafruit_PCD8544 display = Adafruit_PCD8544(DISPLAY_SCLK,
-                                            DISPLAY_DIN,
-                                            DISPLAY_DC,
-                                            DISPLAY_CS,
-                                            DISPLAY_RST);
+#define PIN_DISPLAY_SCLK 7 // Serial clock out    (SCLK)
+#define PIN_DISPLAY_DIN  6 // Serial data out     (DIN)
+#define PIN_DISPLAY_DC   5 // Data/command select (D/C)
+#define PIN_DISPLAY_CS   4 // LCD chip select     (CS)
+#define PIN_DISPLAY_RST  3 // LCD reset           (RST)
+
+Adafruit_PCD8544 display = Adafruit_PCD8544(PIN_DISPLAY_SCLK,
+                                            PIN_DISPLAY_DIN,
+                                            PIN_DISPLAY_DC,
+                                            PIN_DISPLAY_CS,
+                                            PIN_DISPLAY_RST);
 
 // NOTE: virtual methods enlarge the binary size
 
@@ -26,10 +29,12 @@ class bitmap {
 public:
         bitmap(const uint8_t * buffer,
                uint16_t        width,
-               uint16_t        height) :
+               uint16_t        height,
+               uint16_t        color) :
                 buffer_(buffer),
                 width_(width),
-                height_(height)
+                height_(height),
+                color_(color)
         { }
 
         virtual ~bitmap()
@@ -38,11 +43,13 @@ public:
         const uint8_t * buffer()  { return buffer_; }
         uint16_t        width()   { return width_;  }
         uint16_t        height()  { return height_; }
+        uint16_t        color()   { return color_;  }
 
 private:
         const uint8_t * buffer_;
         uint16_t        width_;
         uint16_t        height_;
+        uint16_t        color_;
 };
 
 class image : public bitmap {
@@ -52,7 +59,7 @@ public:
               const uint8_t * buffer,
               uint16_t        w,
               uint16_t        h) :
-                x_(x), y_(y), bitmap(buffer, w, h)
+                x_(x), y_(y), bitmap(buffer, w, h, 1)
         { }
 
         virtual ~image()
@@ -62,8 +69,8 @@ public:
                           uint16_t y)
         { x_ = x; y_ = y; }
 
-        virtual void draw(uint16_t color)
-        { display.drawBitmap(x_, y_, buffer(), width(), height(), color); }
+        virtual void draw()
+        { display.drawBitmap(x_, y_, buffer(), width(), height(), color()); }
 
 private:
         uint16_t x_;
@@ -91,7 +98,7 @@ public:
         virtual void draw() {
                 if (!visible_)
                         return;
-                image::draw(1);
+                image::draw();
         }
 
 private:
@@ -125,13 +132,6 @@ channel_t channel;
 #define sbi(sfr, bit) (_SFR_BYTE(sfr) |= _BV(bit))
 #endif
 
-// Arduino pins
-#define PHOTODIODE  0
-#define MODE        3
-#define SENSITIVITY 4
-#define XSYNC       7
-#define BUTTON      8
-
 // 4 microsecond precision timing using 16MHz Arduino
 extern volatile unsigned long timer0_overflow_count;
 
@@ -139,10 +139,16 @@ extern volatile unsigned long timer0_overflow_count;
 volatile unsigned long prev_pulse, time_passed;
 
 int ar0;              // Photodiode input
-int threshold;        // Pulse height threshold. DIP #2 off: 10, on: 5
-int mode;             // DIP #1 off: 1st pulse, on: first pulse
 int pulse_count;      // Pulse count
 int prev_pulse_count; // Pulses in previous pulse groups
+
+int threshold = 50;   // Pulse height threshold
+
+typedef enum {
+        MODE_DUMB,
+        MODE_SMART
+} mode_t;
+mode_t mode = MODE_SMART;
 
 // Each tick is 4 microsecond
 unsigned long hpticks()
@@ -151,31 +157,9 @@ unsigned long hpticks()
 // Fire the flash with a 15 microsecond pulse on the xsync terminal
 void fire_flash()
 {
-        digitalWrite(XSYNC, HIGH);
+        digitalWrite(PIN_XSYNC, HIGH);
         delayMicroseconds(15);
-        digitalWrite(XSYNC, LOW);
-}
-
-void dip_config(int info)
-{
-        // DIP switch #1
-        if (digitalRead(MODE) == HIGH)
-                mode = 1; // Switch Off: smart mode
-        else
-                mode = 0; // Switch On: dumb mode
-
-        // DIP switch #2
-        if (digitalRead(SENSITIVITY) == HIGH)
-                threshold = 50; // Switch off: low sensitivity
-        else
-                threshold = 15; // Switch on: high sensitivity
-
-        if (info == 1) {
-                Serial.print("Mode: ");
-                Serial.print(mode);
-                Serial.print(", Sensitivity: ");
-                Serial.println(threshold);
-        }
+        digitalWrite(PIN_XSYNC, LOW);
 }
 
 void setup()
@@ -202,20 +186,14 @@ void setup()
         sbi(ADCSRA, ADPS1);
         sbi(ADCSRA, ADPS0);
 
-        pinMode(PHOTODIODE, INPUT);
-        pinMode(MODE,       INPUT);
-        digitalWrite(MODE, HIGH);        // Use the internal pull-up register
-        pinMode(SENSITIVITY, INPUT);
-        digitalWrite(SENSITIVITY, HIGH); // Use the internal pull-up register
-        pinMode(XSYNC,  OUTPUT);
-        pinMode(BUTTON, INPUT);
+        pinMode(PIN_PHOTODIODE, INPUT);
+        pinMode(PIN_XSYNC,      OUTPUT);
 
         // I don't why. The first analog read always return 1023 so a dummy
         // read is added
-        analogRead(PHOTODIODE);
-        ar0 = analogRead(PHOTODIODE);
+        analogRead(PIN_PHOTODIODE);
 
-        dip_config(1);
+        ar0 = analogRead(PIN_PHOTODIODE);
 
         Serial.println("Ready");
 }
@@ -225,7 +203,7 @@ void loop()
         int           new_ar, delta;
         unsigned long now;
 
-        new_ar = analogRead(PHOTODIODE);
+        new_ar = analogRead(PIN_PHOTODIODE);
         delta  = new_ar - ar0;
 
         now         = hpticks();
@@ -243,13 +221,11 @@ void loop()
                 pulse_count = 0;
                 prev_pulse_count = 0;
                 prev_pulse = now;
-                // Check the DIP switches. No serial xfer to save time.
-                dip_config(0);
         }
 
         if (delta > threshold) {
-                if (mode == 0) {
-                        // Dumb mode. Fires upon seeing any light pulse
+                if (mode == MODE_DUMB) {
+                        // Fires upon seeing any light pulse
                         fire_flash();
                 } else {
                         // Smart mode
@@ -269,7 +245,7 @@ void loop()
                         } else {
                                 // Get to the end of the pulse. Some pulses are
                                 // specially wide.
-                                while (analogRead(PHOTODIODE) > threshold);
+                                while (analogRead(PIN_PHOTODIODE) > threshold);
                                 // Increase the pulse count
                                 pulse_count++;
                                 // Keep track of the time a pulse is detected
@@ -279,16 +255,5 @@ void loop()
         } else {
                 // Background. It should be zero most of the time
                 ar0 = new_ar;
-        }
-
-        // Read the button status
-        if (digitalRead(BUTTON) == HIGH) {
-                fire_flash();
-                pulse_count      = 0;
-                prev_pulse_count = 0;
-                dip_config(1);
-
-                // Avoid button contact problem so delay 300ms
-                delay(300);
         }
 }
