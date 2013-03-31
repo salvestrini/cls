@@ -11,25 +11,25 @@
 #define PIN_PHOTODIODE  0
 #define PIN_XSYNC       7
 
-#define PIN_DISPLAY_SCLK 7 // Serial clock out    (SCLK)
-#define PIN_DISPLAY_DIN  6 // Serial data out     (DIN)
-#define PIN_DISPLAY_DC   5 // Data/command select (D/C)
-#define PIN_DISPLAY_CS   4 // LCD chip select     (CS)
-#define PIN_DISPLAY_RST  3 // LCD reset           (RST)
+#define PIN_LCD_SCLK    7 // Serial clock out    (SCLK)
+#define PIN_LCD_DIN     6 // Serial data out     (DIN)
+#define PIN_LCD_DC      5 // Data/command select (D/C)
+#define PIN_LCD_CS      4 // LCD chip select     (CS)
+#define PIN_LCD_RST     3 // LCD reset           (RST)
 
-#define DEBUG 0
+#define DEBUG 1
 
 #if DEBUG
-#define LDBG(X) do { Serial.println(X); } while (0)
+#define LDBG(FMT, ARG...) do { Serial.println(FMT, ##ARG); } while (0)
 #else
-#define LDBG(X)
+#define LDBG(FMT, ARG...)
 #endif
 
-Adafruit_PCD8544 display = Adafruit_PCD8544(PIN_DISPLAY_SCLK,
-                                            PIN_DISPLAY_DIN,
-                                            PIN_DISPLAY_DC,
-                                            PIN_DISPLAY_CS,
-                                            PIN_DISPLAY_RST);
+Adafruit_PCD8544 lcd = Adafruit_PCD8544(PIN_LCD_SCLK,
+                                        PIN_LCD_DIN,
+                                        PIN_LCD_DC,
+                                        PIN_LCD_CS,
+                                        PIN_LCD_RST);
 
 // FIXME: virtual methods enlarge the binary size ...
 
@@ -62,6 +62,12 @@ private:
 
 class image : public bitmap {
 public:
+        image(const uint8_t * buffer,
+              uint16_t        w,
+              uint16_t        h) :
+                x_(0), y_(0), bitmap(buffer, w, h, 1)
+        { }
+#if 0
         image(uint16_t        x,
               uint16_t        y, 
               const uint8_t * buffer,
@@ -69,7 +75,7 @@ public:
               uint16_t        h) :
                 x_(x), y_(y), bitmap(buffer, w, h, 1)
         { }
-
+#endif
         virtual ~image()
         { }
         
@@ -78,7 +84,12 @@ public:
         { x_ = x; y_ = y; }
 
         virtual void draw()
-        { display.drawBitmap(x_, y_, buffer(), width(), height(), color()); }
+        {
+                lcd.drawBitmap(x_, y_,
+                               buffer(), width(), height(),
+                               color());
+                lcd.display();
+        }
 
 private:
         uint16_t x_;
@@ -87,6 +98,13 @@ private:
 
 class icon : public image {
 public:
+        icon(const uint8_t * buffer,
+             uint16_t        w,
+             uint16_t        h) :
+                image(buffer, w, h),
+                visible_(true)
+        { }
+#if 0
         icon(uint16_t        x,
              uint16_t        y, 
              const uint8_t * buffer,
@@ -95,10 +113,11 @@ public:
                 image(x, y, buffer, w, h),
                 visible_(true)
         { }
-
+#endif
         virtual ~icon()
         { }
 
+        virtual bool changed() { return true;      }
         virtual bool visible() { return visible_;  }
         virtual void hide()    { visible_ = false; }
         virtual void show()    { visible_ = true;  }
@@ -112,12 +131,6 @@ public:
 private:
         bool visible_;
 };
-
-// UI items
-icon ui_battery (0,                  0, NULL, 0, 0);
-icon ui_mode    (ui_battery.width(), 0, NULL, 0, 0);
-icon ui_power   (ui_mode.width(),    0, NULL, 0, 0);
-icon ui_channel (ui_power.width(),   0, NULL, 0, 0);
 
 typedef enum {
         GROUP_A,
@@ -170,21 +183,28 @@ group_t   group;
 channel_t channel;
 int       threshold;
 
+// UI items
+icon ui_battery (NULL, 0, 0);
+icon ui_mode    (NULL, 0, 0);
+icon ui_power   (NULL, 0, 0);
+icon ui_channel (NULL, 0, 0);
+
 void setup()
 {
 #if DEBUG
         Serial.begin(57600);
 #endif
 
-        display.begin();
-        display.setContrast(50);
-        display.clearDisplay();
+        lcd.begin();
+        lcd.setContrast(50);
+        lcd.clearDisplay();
 
-        display.setTextSize(1);
-        display.setTextColor(BLACK);
-        
-        display.setCursor(0, 0);
-        display.println("Hello world");
+        lcd.setTextSize(1);
+        lcd.setTextColor(BLACK);
+        lcd.setTextWrap(false);
+
+        lcd.setCursor(0, 0);
+        lcd.println("Hello world");
 
         // Use internal reference voltage of 1.2v for ADC
         analogReference(INTERNAL);
@@ -211,10 +231,37 @@ void setup()
         group     = GROUP_A;
         channel   = CHANNEL_1;
 
+        ui_battery.move(0, 0);
+        ui_mode.move(0, 0);
+        ui_power.move(0, 0);
+        ui_channel.move(0, 0);
+
+#if DEBUG
+        if (lcd.width() <
+            (ui_battery.width() +
+             ui_mode.width()    +
+             ui_power.width()   +
+             ui_channel.width()))
+                LDBG("Display is too short ...");
+#endif
+
         LDBG("Ready");
 }
 
-void loop()
+void loop_ui()
+{
+        // (Re-)Draw changed items
+        if (ui_battery.changed())
+                ui_battery.draw();
+        if (ui_mode.changed())
+                ui_mode.draw();
+        if (ui_power.changed())
+                ui_power.draw();
+        if (ui_channel.changed())
+                ui_channel.draw();
+}
+
+void loop_slave()
 {
         int           new_ar, delta;
         unsigned long now;
@@ -274,10 +321,10 @@ void loop()
                 // Background. It should be zero most of the time
                 ar0 = new_ar;
         }
+}
 
-        // Handle the UI
-        ui_battery.draw();
-        ui_mode.draw();
-        ui_power.draw();
-        ui_channel.draw();
+void loop()
+{
+        loop_slave();
+        loop_ui();
 }
