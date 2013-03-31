@@ -17,6 +17,14 @@
 #define PIN_DISPLAY_CS   4 // LCD chip select     (CS)
 #define PIN_DISPLAY_RST  3 // LCD reset           (RST)
 
+#define DEBUG 0
+
+#if DEBUG
+#define LDBG(X) do { Serial.println(X); } while (0)
+#else
+#define LDBG(X)
+#endif
+
 Adafruit_PCD8544 display = Adafruit_PCD8544(PIN_DISPLAY_SCLK,
                                             PIN_DISPLAY_DIN,
                                             PIN_DISPLAY_DC,
@@ -124,14 +132,6 @@ typedef enum {
 
 channel_t channel;
 
-// Defines for setting and clearing register bits
-#ifndef cbi
-#define cbi(sfr, bit) (_SFR_BYTE(sfr) &= ~_BV(bit))
-#endif
-#ifndef sbi
-#define sbi(sfr, bit) (_SFR_BYTE(sfr) |= _BV(bit))
-#endif
-
 // 4 microsecond precision timing using 16MHz Arduino
 extern volatile unsigned long timer0_overflow_count;
 
@@ -142,13 +142,13 @@ int ar0;              // Photodiode input
 int pulse_count;      // Pulse count
 int prev_pulse_count; // Pulses in previous pulse groups
 
-int threshold = 50;   // Pulse height threshold
+int threshold;
 
 typedef enum {
         MODE_DUMB,
         MODE_SMART
 } mode_t;
-mode_t mode = MODE_SMART;
+mode_t mode;
 
 // Each tick is 4 microsecond
 unsigned long hpticks()
@@ -162,9 +162,19 @@ void fire_flash()
         digitalWrite(PIN_XSYNC, LOW);
 }
 
+// Defines for setting and clearing register bits
+#ifndef cbi
+#define cbi(sfr, bit) (_SFR_BYTE(sfr) &= ~_BV(bit))
+#endif
+#ifndef sbi
+#define sbi(sfr, bit) (_SFR_BYTE(sfr) |= _BV(bit))
+#endif
+
 void setup()
 {
+#if DEBUG
         Serial.begin(57600);
+#endif
 
         display.begin();
         display.setContrast(50);
@@ -172,6 +182,7 @@ void setup()
 
         display.setTextSize(1);
         display.setTextColor(BLACK);
+        
         display.setCursor(0, 0);
         display.println("Hello world");
 
@@ -192,10 +203,13 @@ void setup()
         // I don't why. The first analog read always return 1023 so a dummy
         // read is added
         analogRead(PIN_PHOTODIODE);
-
         ar0 = analogRead(PIN_PHOTODIODE);
 
-        Serial.println("Ready");
+        // Values to be stored on flash memory (later on)
+        threshold = 50;
+        mode      = MODE_SMART;
+
+        LDBG("Ready");
 }
 
 void loop()
@@ -203,9 +217,8 @@ void loop()
         int           new_ar, delta;
         unsigned long now;
 
-        new_ar = analogRead(PIN_PHOTODIODE);
-        delta  = new_ar - ar0;
-
+        new_ar      = analogRead(PIN_PHOTODIODE);
+        delta       = new_ar - ar0;
         now         = hpticks();
         time_passed = now - prev_pulse;
 
@@ -239,6 +252,7 @@ void loop()
                             (prev_pulse_count == 1 || prev_pulse_count > 5)) {
                                 // Fire the flash now!
                                 fire_flash();
+                                
                                 // Reset the pulse counter
                                 pulse_count      = 0;
                                 prev_pulse_count = 0;
@@ -246,8 +260,10 @@ void loop()
                                 // Get to the end of the pulse. Some pulses are
                                 // specially wide.
                                 while (analogRead(PIN_PHOTODIODE) > threshold);
+                                
                                 // Increase the pulse count
                                 pulse_count++;
+                                
                                 // Keep track of the time a pulse is detected
                                 prev_pulse = now;
                         }
