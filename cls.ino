@@ -31,7 +31,7 @@ Adafruit_PCD8544 display = Adafruit_PCD8544(PIN_DISPLAY_SCLK,
                                             PIN_DISPLAY_CS,
                                             PIN_DISPLAY_RST);
 
-// NOTE: virtual methods enlarge the binary size
+// FIXME: virtual methods enlarge the binary size ...
 
 class bitmap {
 public:
@@ -113,15 +113,16 @@ private:
         bool visible_;
 };
 
-icon battery (0,               0, NULL, 0, 0);
-//icon mode    (battery.width(), 0, NULL, 0, 0);
+// UI items
+icon ui_battery (0,                  0, NULL, 0, 0);
+icon ui_mode    (ui_battery.width(), 0, NULL, 0, 0);
+icon ui_power   (ui_mode.width(),    0, NULL, 0, 0);
+icon ui_channel (ui_power.width(),   0, NULL, 0, 0);
 
 typedef enum {
         GROUP_A,
         GROUP_B
 } group_t;
-
-group_t group;
 
 typedef enum {
         CHANNEL_1,
@@ -130,29 +131,10 @@ typedef enum {
         CHANNEL_4
 } channel_t;
 
-channel_t channel;
-
-// 4 microsecond precision timing using 16MHz Arduino
-extern volatile unsigned long timer0_overflow_count;
-
-// For timeing measurements
-volatile unsigned long prev_pulse, time_passed;
-
-int ar0;              // Photodiode input
-int pulse_count;      // Pulse count
-int prev_pulse_count; // Pulses in previous pulse groups
-
-int threshold;
-
 typedef enum {
         MODE_DUMB,
         MODE_SMART
 } mode_t;
-mode_t mode;
-
-// Each tick is 4 microsecond
-unsigned long hpticks()
-{ return (timer0_overflow_count << 8) + TCNT0; }
 
 // Fire the flash with a 15 microsecond pulse on the xsync terminal
 void fire_flash()
@@ -162,6 +144,12 @@ void fire_flash()
         digitalWrite(PIN_XSYNC, LOW);
 }
 
+// 4 microsecond precision timing using 16MHz Arduino
+extern volatile unsigned long timer0_overflow_count;
+
+unsigned long hpticks()
+{ return (timer0_overflow_count << 8) + TCNT0; }
+
 // Defines for setting and clearing register bits
 #ifndef cbi
 #define cbi(sfr, bit) (_SFR_BYTE(sfr) &= ~_BV(bit))
@@ -169,6 +157,18 @@ void fire_flash()
 #ifndef sbi
 #define sbi(sfr, bit) (_SFR_BYTE(sfr) |= _BV(bit))
 #endif
+
+// For timeing measurements
+volatile unsigned long        prev_pulse, time_passed;
+
+int       ar0;              // Photodiode input
+int       pulse_count;      // Pulse count
+int       prev_pulse_count; // Pulses in previous pulse groups
+
+mode_t    mode;
+group_t   group;
+channel_t channel;
+int       threshold;
 
 void setup()
 {
@@ -208,6 +208,8 @@ void setup()
         // Values to be stored on flash memory (later on)
         threshold = 50;
         mode      = MODE_SMART;
+        group     = GROUP_A;
+        channel   = CHANNEL_1;
 
         LDBG("Ready");
 }
@@ -272,4 +274,10 @@ void loop()
                 // Background. It should be zero most of the time
                 ar0 = new_ar;
         }
+
+        // Handle the UI
+        ui_battery.draw();
+        ui_mode.draw();
+        ui_power.draw();
+        ui_channel.draw();
 }
