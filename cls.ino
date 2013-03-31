@@ -98,8 +98,24 @@ private:
         bool visible_;
 };
 
-icon battery(0, 0, NULL, 0, 0);
-icon group(battery.width(), 0, NULL, 0, 0);
+icon battery (0,               0, NULL, 0, 0);
+//icon mode    (battery.width(), 0, NULL, 0, 0);
+
+typedef enum {
+        GROUP_A,
+        GROUP_B
+} group_t;
+
+group_t group;
+
+typedef enum {
+        CHANNEL_1,
+        CHANNEL_2,
+        CHANNEL_3,
+        CHANNEL_4
+} channel_t;
+
+channel_t channel;
 
 // Defines for setting and clearing register bits
 #ifndef cbi
@@ -130,9 +146,7 @@ int prev_pulse_count; // Pulses in previous pulse groups
 
 // Each tick is 4 microsecond
 unsigned long hpticks()
-{
-        return (timer0_overflow_count << 8) + TCNT0;
-}
+{ return (timer0_overflow_count << 8) + TCNT0; }
 
 // Fire the flash with a 15 microsecond pulse on the xsync terminal
 void fire_flash()
