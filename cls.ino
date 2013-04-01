@@ -76,18 +76,18 @@ public:
 
         virtual void on()
         {
-                state_ = true;
                 digitalWrite(pin_, HIGH);
+                state_ = true;
 
-                LDBG("Status led is now ON");
+                // LDBG("Status led is now ON");
         }
 
         virtual void off()
         {
-                state_ = false;
                 digitalWrite(pin_, LOW);
+                state_ = false;
 
-                LDBG("Status led is now OFF");
+                // LDBG("Status led is now OFF");
         }
 
         virtual void flip()
@@ -394,7 +394,16 @@ void loop_status_led()
 
 void loop()
 {
-        loop_slave();
-        loop_ui();
+        LDBG("Looping ...");
+
+        //loop_slave();
+        //loop_ui();
         loop_status_led();
+        delay(100);
+
+        if (button_group.is_pressed())
+                LDBG("Button-group is pressed");
+
+        if (button_channel.is_pressed())
+                LDBG("Button-channel is pressed");
 }
