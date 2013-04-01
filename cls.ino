@@ -26,8 +26,10 @@
 
 #if DEBUG
 #define LDBG(FMT, ARG...) do { Serial.println(FMT, ##ARG); } while (0)
+#define CDBG(FMT, ARG...) do { Serial.print(FMT, ##ARG);   } while (0)
 #else
 #define LDBG(FMT, ARG...)
+#define CDBG(FMT, ARG...)
 #endif
 
 Adafruit_PCD8544 lcd = Adafruit_PCD8544(PIN_LCD_SCLK,
@@ -42,8 +44,12 @@ typedef uint8_t pin_t;
 
 class button {
 public:
-        button(pin_t pin) :
-                pin_(pin)
+        button(pin_t pin, long debounce_delay = 50) :
+                pin_(pin),
+                debounce_delay_(debounce_delay),
+                debounce_time_(0),
+                last_state_(LOW),
+                state_(LOW)
         { }
 
         virtual ~button()
@@ -53,9 +59,23 @@ public:
         { pinMode(pin_, INPUT); }
 
         virtual bool is_pressed()
-        { return digitalRead(pin_) ? true : false; }
+        {
+                int reading = digitalRead(pin_);
+                if (reading != last_state_)
+                        debounce_time_ = millis();
+                if ((millis() - debounce_time_) > debounce_delay_)
+                        state_ = reading;
+                last_state_ = reading;
+
+                return reading ? true : false;
+        }
+
 private:
         pin_t pin_;
+        long  debounce_delay_;
+        long  debounce_time_;
+        int   last_state_;
+        int   state_;
 };
 
 class led {
@@ -199,7 +219,8 @@ private:
 
 typedef enum {
         GROUP_A,
-        GROUP_B
+        GROUP_B,
+        GROUP_NONE,
 } group_t;
 
 typedef enum {
@@ -392,18 +413,58 @@ void loop_status_led()
         led_status.flip();
 }
 
+void spin_group()
+{
+        switch (group) {
+        case GROUP_A:    group = GROUP_B;    break;
+        case GROUP_B:    group = GROUP_NONE; break;
+        case GROUP_NONE: group = GROUP_A;    break;
+        default:                             break;
+        }
+}
+
+void spin_channel()
+{
+        switch (channel) {
+        case CHANNEL_1: channel = CHANNEL_2; break;
+        case CHANNEL_2: channel = CHANNEL_3; break;
+        case CHANNEL_3: channel = CHANNEL_4; break;
+        case CHANNEL_4: channel = CHANNEL_1; break;
+        default:                             break;
+        }
+}
+
 void loop()
 {
         LDBG("Looping ...");
+        delay(100);
 
         //loop_slave();
         //loop_ui();
         loop_status_led();
-        delay(100);
 
         if (button_group.is_pressed())
-                LDBG("Button-group is pressed");
+                spin_group();
 
         if (button_channel.is_pressed())
-                LDBG("Button-channel is pressed");
+                spin_channel();
+
+#if DEBUG
+        CDBG("G=");
+        switch (group) {
+        case GROUP_A:    CDBG("A"); break;
+        case GROUP_B:    CDBG("B"); break;
+        case GROUP_NONE: CDBG("-"); break;
+        default:                   break;
+        }
+        CDBG(" C=");
+        switch (channel) {
+        case CHANNEL_1: CDBG("1"); break;
+        case CHANNEL_2: CDBG("2"); break;
+        case CHANNEL_3: CDBG("3"); break;
+        case CHANNEL_4: CDBG("4"); break;
+        default:                   break;
+        }
+        LDBG("");
+#endif
 }
