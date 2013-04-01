@@ -172,7 +172,7 @@ unsigned long hpticks()
 #endif
 
 // For timeing measurements
-volatile unsigned long        prev_pulse, time_passed;
+volatile unsigned long prev_pulse, time_passed;
 
 int       ar0;              // Photodiode input
 int       pulse_count;      // Pulse count
