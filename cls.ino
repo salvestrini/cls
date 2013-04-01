@@ -8,14 +8,19 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_PCD8544.h>
 
-#define PIN_PHOTODIODE  0
-#define PIN_XSYNC       7
+#define PIN_PHOTODIODE      0
+#define PIN_XSYNC           1
 
-#define PIN_LCD_SCLK    7 // Serial clock out    (SCLK)
-#define PIN_LCD_DIN     6 // Serial data out     (DIN)
-#define PIN_LCD_DC      5 // Data/command select (D/C)
-#define PIN_LCD_CS      4 // LCD chip select     (CS)
-#define PIN_LCD_RST     3 // LCD reset           (RST)
+#define PIN_LED            13 // Internal LED
+
+#define PIN_BUTTON_GROUP    8
+#define PIN_BUTTON_CHANNEL  9
+
+#define PIN_LCD_SCLK        7 // Serial clock out    (SCLK)
+#define PIN_LCD_DIN         6 // Serial data out     (DIN)
+#define PIN_LCD_DC          5 // Data/command select (D/C)
+#define PIN_LCD_CS          4 // LCD chip select     (CS)
+#define PIN_LCD_RST         3 // LCD reset           (RST)
 
 #define DEBUG 1
 
@@ -32,6 +37,66 @@ Adafruit_PCD8544 lcd = Adafruit_PCD8544(PIN_LCD_SCLK,
                                         PIN_LCD_RST);
 
 // FIXME: virtual methods enlarge the binary size ...
+
+typedef uint8_t pin_t;
+
+class button {
+public:
+        button(pin_t pin) :
+                pin_(pin)
+        { }
+
+        virtual ~button()
+        { }
+
+        virtual void setup()
+        { pinMode(pin_, INPUT); }
+
+        virtual bool is_pressed()
+        { return digitalRead(pin_) ? true : false; }
+private:
+        pin_t pin_;
+};
+
+class led {
+public:
+        led(pin_t pin, bool state) :
+                pin_(pin),
+                state_(state)
+        { }
+
+        virtual ~led()
+        { }
+
+        virtual void setup()
+        {
+                pinMode(pin_, OUTPUT);
+                if (state_) on(); else off();
+        }
+
+        virtual void on()
+        {
+                state_ = true;
+                digitalWrite(pin_, HIGH);
+
+                LDBG("Status led is now ON");
+        }
+
+        virtual void off()
+        {
+                state_ = false;
+                digitalWrite(pin_, LOW);
+
+                LDBG("Status led is now OFF");
+        }
+
+        virtual void flip()
+        { if (state_) off(); else on(); }
+
+private:
+        pin_t pin_;
+        bool  state_;
+};
 
 class bitmap {
 public:
@@ -69,7 +134,7 @@ public:
         { }
 #if 0
         image(uint16_t        x,
-              uint16_t        y, 
+              uint16_t        y,
               const uint8_t * buffer,
               uint16_t        w,
               uint16_t        h) :
@@ -78,7 +143,7 @@ public:
 #endif
         virtual ~image()
         { }
-        
+
         virtual void move(uint16_t x,
                           uint16_t y)
         { x_ = x; y_ = y; }
@@ -106,7 +171,7 @@ public:
         { }
 #if 0
         icon(uint16_t        x,
-             uint16_t        y, 
+             uint16_t        y,
              const uint8_t * buffer,
              uint16_t        w,
              uint16_t        h) :
@@ -144,11 +209,6 @@ typedef enum {
         CHANNEL_4
 } channel_t;
 
-typedef enum {
-        MODE_DUMB,
-        MODE_SMART
-} mode_t;
-
 // Fire the flash with a 15 microsecond pulse on the xsync terminal
 void fire_flash()
 {
@@ -178,23 +238,25 @@ int       ar0;              // Photodiode input
 int       pulse_count;      // Pulse count
 int       prev_pulse_count; // Pulses in previous pulse groups
 
-mode_t    mode;
 group_t   group;
 channel_t channel;
 int       threshold;
 
 // UI items
-icon ui_battery (NULL, 0, 0);
-icon ui_mode    (NULL, 0, 0);
-icon ui_power   (NULL, 0, 0);
-icon ui_channel (NULL, 0, 0);
+icon   ui_battery (NULL, 0, 0);
+icon   ui_mode    (NULL, 0, 0);
+icon   ui_power   (NULL, 0, 0);
+icon   ui_channel (NULL, 0, 0);
+
+button button_group(PIN_BUTTON_GROUP);
+button button_channel(PIN_BUTTON_CHANNEL);
+led    led_status(PIN_LED, false);
 
 void setup()
 {
 #if DEBUG
         Serial.begin(57600);
 #endif
-
         lcd.begin();
         lcd.setContrast(50);
         lcd.clearDisplay();
@@ -217,8 +279,13 @@ void setup()
         sbi(ADCSRA, ADPS1);
         sbi(ADCSRA, ADPS0);
 
-        pinMode(PIN_PHOTODIODE, INPUT);
-        pinMode(PIN_XSYNC,      OUTPUT);
+        
+        button_group.setup();
+        button_channel.setup();
+        led_status.setup();
+
+        pinMode(PIN_PHOTODIODE,     INPUT);
+        pinMode(PIN_XSYNC,          OUTPUT);
 
         // I don't why. The first analog read always return 1023 so a dummy
         // read is added
@@ -227,7 +294,6 @@ void setup()
 
         // Values to be stored on flash memory (later on)
         threshold = 50;
-        mode      = MODE_SMART;
         group     = GROUP_A;
         channel   = CHANNEL_1;
 
@@ -235,7 +301,7 @@ void setup()
         ui_mode.move(0, 0);
         ui_power.move(0, 0);
         ui_channel.move(0, 0);
-
+        
 #if DEBUG
         if (lcd.width() <
             (ui_battery.width() +
@@ -286,36 +352,29 @@ void loop_slave()
         }
 
         if (delta > threshold) {
-                if (mode == MODE_DUMB) {
-                        // Fires upon seeing any light pulse
+                // If the delay since the previous pulse is longer than
+                // 10000*4 microseconds (40ms)...
+                        
+                // Checking the previous pulse group is needed to avoid
+                // mis-fire.
+                if ((time_passed > 10000) &&
+                    (prev_pulse_count == 1 || prev_pulse_count > 5)) {
+                        // Fire the flash now!
                         fire_flash();
+                        
+                        // Reset the pulse counter
+                        pulse_count      = 0;
+                        prev_pulse_count = 0;
                 } else {
-                        // Smart mode
-
-                        // If the delay since the previous pulse is longer than
-                        // 10000*4 microseconds (40ms)...
-
-                        // Checking the previous pulse group is needed to avoid
-                        // mis-fire.
-                        if ((time_passed > 10000) &&
-                            (prev_pulse_count == 1 || prev_pulse_count > 5)) {
-                                // Fire the flash now!
-                                fire_flash();
-                                
-                                // Reset the pulse counter
-                                pulse_count      = 0;
-                                prev_pulse_count = 0;
-                        } else {
-                                // Get to the end of the pulse. Some pulses are
-                                // specially wide.
-                                while (analogRead(PIN_PHOTODIODE) > threshold);
-                                
-                                // Increase the pulse count
-                                pulse_count++;
-                                
-                                // Keep track of the time a pulse is detected
-                                prev_pulse = now;
-                        }
+                        // Get to the end of the pulse. Some pulses are
+                        // specially wide.
+                        while (analogRead(PIN_PHOTODIODE) > threshold);
+                        
+                        // Increase the pulse count
+                        pulse_count++;
+                        
+                        // Keep track of the time a pulse is detected
+                        prev_pulse = now;
                 }
         } else {
                 // Background. It should be zero most of the time
@@ -323,8 +382,19 @@ void loop_slave()
         }
 }
 
+typedef enum {
+        STATUS_CONFIGURING,
+        STATUS_RUNNING,
+} status_t;
+
+void loop_status_led()
+{
+        led_status.flip();
+}
+
 void loop()
 {
         loop_slave();
         loop_ui();
+        loop_status_led();
 }
