@@ -42,80 +42,194 @@ Adafruit_PCD8544 lcd = Adafruit_PCD8544(PIN_LCD_SCLK,
 
 typedef uint8_t pin_t;
 
-class button {
+class pin {
 public:
-        button(pin_t pin, long debounce_delay = 50) :
-                pin_(pin),
-                debounce_delay_(debounce_delay),
-                debounce_time_(0),
-                last_state_(LOW),
-                state_(LOW)
+        pin(pin_t p) :
+                pin_(p)
         { }
 
-        virtual ~button()
+        //virtual ~pin() { }
+
+        virtual void setup() = 0;
+
+protected:
+        pin_t pin_;
+};
+
+class analog_pin_input : private pin {
+public:
+        analog_pin_input(pin_t p) :
+                pin(p)
         { }
+
+        //virtual ~digital_pin_input() { }
 
         virtual void setup()
         { pinMode(pin_, INPUT); }
 
-        virtual bool is_pressed()
-        {
-                int reading = digitalRead(pin_);
-                if (reading != last_state_)
-                        debounce_time_ = millis();
-                if ((millis() - debounce_time_) > debounce_delay_)
-                        state_ = reading;
-                last_state_ = reading;
-
-                return reading ? true : false;
-        }
-
-private:
-        pin_t pin_;
-        long  debounce_delay_;
-        long  debounce_time_;
-        int   last_state_;
-        int   state_;
+        virtual int get()
+        { return analogRead(pin_); }
 };
 
-class led {
+class digital_pin_input : private pin {
 public:
-        led(pin_t pin, bool state) :
-                pin_(pin),
-                state_(state)
+        digital_pin_input(pin_t p) :
+                pin(p)
         { }
 
-        virtual ~led()
+        //virtual ~digital_pin_input() { }
+
+        virtual void setup()
+        { pinMode(pin_, INPUT); }
+
+        virtual bool get()
+        { return digitalRead(pin_) == HIGH ? true : false; }
+};
+
+class digital_pin_output : public pin {
+public:
+        digital_pin_output(pin_t p) :
+                pin(p)
         { }
+
+        //virtual ~digital_pin_output() { }
+
+        virtual void setup()
+        { pinMode(pin_, INPUT); }
+
+        virtual void set(bool value)
+        { digitalWrite(pin_, value ? HIGH : LOW); }
+};
+
+class button : private digital_pin_input {
+public:
+        button(pin_t  p,
+               size_t presses_max      = 3,
+               long   time_debounce    = 20,
+               long   time_multi_click = 250,
+               long   time_held_down   = 1000) :
+                digital_pin_input(p),
+                presses_max_      (presses_max),
+                time_debounce_    (time_debounce),
+                time_multi_click_ (time_multi_click),
+                time_held_down_   (time_held_down)
+        {
+                clicks_           = 0;
+                depressed_        = false;
+                state_last_       = false;
+                presses_current_  = 0;
+                time_last_bounce_ = 0;
+        }
+
+        //virtual ~button() { }
+
+        virtual void setup()
+        { digital_pin_input::setup(); }
+
+        virtual void update()
+        {
+                // Get current time && state
+                long now   = (long) millis();
+                bool state = get(); //digitalRead(pin_);
+
+                // If the switch has changed, reset the debounce timer
+                if (state != state_last_)
+                        time_last_bounce_ = now;
+
+                // Debounce the button
+                if (now - time_last_bounce_ > time_debounce_ &&
+                    state != depressed_) {
+                        depressed_ = state;
+                        
+                        if (depressed_)
+                                presses_current_++;
+
+                        // Limit number of clicks / button presses
+                        if (presses_current_ > presses_max_)
+                                presses_current_ = presses_max_;
+                }
+
+                // If the button released state is stable, update the clicks
+                // count and start a new cycle
+                if (!depressed_ &&
+                    (now - time_last_bounce_) > time_multi_click_) {
+                        // positive count for released buttons
+                        clicks_          = presses_current_;
+                        presses_current_ = 0;
+                }
+
+                // Check button held-down time
+                if (depressed_ &&
+                    (now - time_last_bounce_ > time_held_down_) &&
+                    clicks_ <= presses_max_) {
+                        // negative count for held-down buttons
+                        clicks_          = 0 - presses_current_;
+                        presses_current_ = 0;
+                }
+
+                state_last_ = state;
+        }
+
+        virtual int clicks()
+        { return clicks_; }
+
+private:
+        pin_t   pin_;
+
+        int     clicks_;
+
+        boolean depressed_;
+
+        size_t  presses_current_;
+        size_t  presses_max_;
+
+        long    time_debounce_;
+        long    time_multi_click_;
+        long    time_held_down_;
+        long    time_last_bounce_;
+
+        boolean state_last_;
+};
+
+class led : private digital_pin_output {
+public:
+        led(pin_t p) :
+                digital_pin_output(p),
+                state_(false)
+        { }
+
+        //virtual ~led() { }
 
         virtual void setup()
         {
-                pinMode(pin_, OUTPUT);
-                if (state_) on(); else off();
+                digital_pin_output::setup();
+                update();
         }
 
         virtual void on()
         {
-                digitalWrite(pin_, HIGH);
+                set(true);
                 state_ = true;
-
-                // LDBG("Status led is now ON");
         }
 
         virtual void off()
         {
-                digitalWrite(pin_, LOW);
+                set(false);
                 state_ = false;
-
-                // LDBG("Status led is now OFF");
         }
 
         virtual void flip()
-        { if (state_) off(); else on(); }
+        {
+                state_ = !state_;
+                update();
+        }
 
 private:
         pin_t pin_;
         bool  state_;
+
+        virtual void update()
+        { if (state_) on(); else off(); }
 };
 
 class bitmap {
@@ -129,9 +243,8 @@ public:
                 height_(height),
                 color_(color)
         { }
-
-        virtual ~bitmap()
-        { }
+        
+        //virtual ~bitmap() { }
 
         const uint8_t * buffer()  { return buffer_; }
         uint16_t        width()   { return width_;  }
@@ -161,8 +274,7 @@ public:
                 x_(x), y_(y), bitmap(buffer, w, h, 1)
         { }
 #endif
-        virtual ~image()
-        { }
+        //virtual ~image() { }
 
         virtual void move(uint16_t x,
                           uint16_t y)
@@ -199,8 +311,7 @@ public:
                 visible_(true)
         { }
 #endif
-        virtual ~icon()
-        { }
+        //virtual ~icon() { }
 
         virtual bool changed() { return true;      }
         virtual bool visible() { return visible_;  }
@@ -217,6 +328,27 @@ private:
         bool visible_;
 };
 
+class xsync : private digital_pin_output {
+public:
+        xsync(pin_t p, long delay = 15) :
+                digital_pin_output(p),
+                delay_(delay)
+        { }
+
+        virtual void setup()
+        { digital_pin_output::setup(); }
+
+        virtual void fire()
+        {
+                set(true);
+                delayMicroseconds(delay_);
+                set(false);
+        }
+
+private:
+        long delay_;
+};
+
 typedef enum {
         GROUP_A,
         GROUP_B,
@@ -229,14 +361,6 @@ typedef enum {
         CHANNEL_3,
         CHANNEL_4
 } channel_t;
-
-// Fire the flash with a 15 microsecond pulse on the xsync terminal
-void fire_flash()
-{
-        digitalWrite(PIN_XSYNC, HIGH);
-        delayMicroseconds(15);
-        digitalWrite(PIN_XSYNC, LOW);
-}
 
 // 4 microsecond precision timing using 16MHz Arduino
 extern volatile unsigned long timer0_overflow_count;
@@ -263,15 +387,18 @@ group_t   group;
 channel_t channel;
 int       threshold;
 
-// UI items
-icon   ui_battery (NULL, 0, 0);
-icon   ui_mode    (NULL, 0, 0);
-icon   ui_power   (NULL, 0, 0);
-icon   ui_channel (NULL, 0, 0);
+icon             ui_battery (NULL, 0, 0);
+icon             ui_mode    (NULL, 0, 0);
+icon             ui_power   (NULL, 0, 0);
+icon             ui_channel (NULL, 0, 0);
 
-button button_group(PIN_BUTTON_GROUP);
-button button_channel(PIN_BUTTON_CHANNEL);
-led    led_status(PIN_LED, false);
+button           button_group(PIN_BUTTON_GROUP);
+button           button_channel(PIN_BUTTON_CHANNEL);
+led              led_status(PIN_LED);
+
+xsync            flash(PIN_XSYNC);
+
+analog_pin_input photodiode(PIN_PHOTODIODE);
 
 void setup()
 {
@@ -299,29 +426,26 @@ void setup()
         cbi(ADCSRA, ADPS2);
         sbi(ADCSRA, ADPS1);
         sbi(ADCSRA, ADPS0);
-
         
         button_group.setup();
         button_channel.setup();
+        flash.setup();
         led_status.setup();
+        photodiode.setup();
 
-        pinMode(PIN_PHOTODIODE,     INPUT);
-        pinMode(PIN_XSYNC,          OUTPUT);
-
-        // I don't why. The first analog read always return 1023 so a dummy
-        // read is added
-        analogRead(PIN_PHOTODIODE);
-        ar0 = analogRead(PIN_PHOTODIODE);
-
+        // The first analog read always return 1023 so a dummy read is added
+        (void) photodiode.get();
+        ar0 = photodiode.get();
+        
         // Values to be stored on flash memory (later on)
         threshold = 50;
         group     = GROUP_A;
         channel   = CHANNEL_1;
 
-        ui_battery.move(0, 0);
-        ui_mode.move(0, 0);
-        ui_power.move(0, 0);
-        ui_channel.move(0, 0);
+        ui_battery.move (0, 0);
+        ui_mode.move    (0, 0);
+        ui_power.move   (0, 0);
+        ui_channel.move (0, 0);
         
 #if DEBUG
         if (lcd.width() <
@@ -353,7 +477,7 @@ void loop_slave()
         int           new_ar, delta;
         unsigned long now;
 
-        new_ar      = analogRead(PIN_PHOTODIODE);
+        new_ar      = photodiode.get();
         delta       = new_ar - ar0;
         now         = hpticks();
         time_passed = now - prev_pulse;
@@ -381,7 +505,7 @@ void loop_slave()
                 if ((time_passed > 10000) &&
                     (prev_pulse_count == 1 || prev_pulse_count > 5)) {
                         // Fire the flash now!
-                        fire_flash();
+                        flash.fire();
                         
                         // Reset the pulse counter
                         pulse_count      = 0;
@@ -389,7 +513,7 @@ void loop_slave()
                 } else {
                         // Get to the end of the pulse. Some pulses are
                         // specially wide.
-                        while (analogRead(PIN_PHOTODIODE) > threshold);
+                        while (photodiode.get() > threshold);
                         
                         // Increase the pulse count
                         pulse_count++;
@@ -403,53 +527,47 @@ void loop_slave()
         }
 }
 
-typedef enum {
-        STATUS_CONFIGURING,
-        STATUS_RUNNING,
+void loop_status_led()
+{ led_status.flip(); }
+
+typedef struct {
+        group_t   group;
+        channel_t channel;
 } status_t;
 
-void loop_status_led()
-{
-        led_status.flip();
-}
+status_t status_current;
 
-void spin_group()
+void spin_group(size_t count)
 {
-        switch (group) {
-        case GROUP_A:    group = GROUP_B;    break;
-        case GROUP_B:    group = GROUP_NONE; break;
-        case GROUP_NONE: group = GROUP_A;    break;
-        default:                             break;
+        for (size_t i = 0; i < count; i++) {
+                switch (group) {
+                case GROUP_A:    group = GROUP_B;    break;
+                case GROUP_B:    group = GROUP_NONE; break;
+                case GROUP_NONE: group = GROUP_A;    break;
+                default:                             break;
+                }
         }
 }
 
-void spin_channel()
+void spin_channel(size_t count)
 {
-        switch (channel) {
-        case CHANNEL_1: channel = CHANNEL_2; break;
-        case CHANNEL_2: channel = CHANNEL_3; break;
-        case CHANNEL_3: channel = CHANNEL_4; break;
-        case CHANNEL_4: channel = CHANNEL_1; break;
-        default:                             break;
+        for (size_t i = 0; i < count; i++) {
+                switch (channel) {
+                case CHANNEL_1: channel = CHANNEL_2; break;
+                case CHANNEL_2: channel = CHANNEL_3; break;
+                case CHANNEL_3: channel = CHANNEL_4; break;
+                case CHANNEL_4: channel = CHANNEL_1; break;
+                default:                             break;
+                }
         }
 }
 
-void loop()
+void lcd_update()
 {
-        LDBG("Looping ...");
-        delay(100);
-
-        //loop_slave();
-        //loop_ui();
-        loop_status_led();
-
-        if (button_group.is_pressed())
-                spin_group();
-
-        if (button_channel.is_pressed())
-                spin_channel();
 
 #if DEBUG
+        CDBG("Current status -> ");
+
         CDBG("G=");
         switch (group) {
         case GROUP_A:    CDBG("A"); break;
@@ -457,7 +575,10 @@ void loop()
         case GROUP_NONE: CDBG("-"); break;
         default:                   break;
         }
-        CDBG(" C=");
+
+        CDBG(" ");
+
+        CDBG("C=");
         switch (channel) {
         case CHANNEL_1: CDBG("1"); break;
         case CHANNEL_2: CDBG("2"); break;
@@ -465,6 +586,23 @@ void loop()
         case CHANNEL_4: CDBG("4"); break;
         default:                   break;
         }
+
         LDBG("");
 #endif
+}
+
+void loop()
+{
+        //loop_slave();
+        //loop_ui();
+        loop_status_led();
+
+        button_group.update();
+        button_channel.update();
+
+        spin_group(button_group.clicks());
+        spin_channel(button_channel.clicks());
+
+        if (button_group.clicks() || button_channel.clicks())
+                lcd_update();
 }
