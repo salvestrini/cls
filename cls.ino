@@ -5,6 +5,9 @@
 //   http://dptnt.com/2010/03/smart-optical-slave-flash-trigger/
 //
 
+//#include <EEPROM.h>
+#include <avr/eeprom.h>
+
 #include <Adafruit_GFX.h>
 #include <Adafruit_PCD8544.h>
 
@@ -412,6 +415,30 @@ private:
         unsigned int delay_;
 };
 
+#if 0
+//template <typename T> int EEPROM_write(int address, const T & value)
+//{
+//        const byte * p = (const byte *)(const void *) &value;
+//
+//        unsigned int i;
+//        for (i = 0; i < sizeof(value); i++)
+//                EEPROM.write(address++, *p++);
+//
+//        return i;
+//}
+//
+//template <typename T> int EEPROM_read(int address, T & value)
+//{
+//        byte* p = (byte *)(void *) &value;
+//
+//        unsigned int i;
+//        for (i = 0; i < sizeof(value); i++)
+//                *p++ = EEPROM.read(address++);
+//
+//        return i;
+//}
+#endif
+
 typedef enum {
         GROUP_A,
         GROUP_B,
@@ -428,6 +455,22 @@ typedef enum {
 typedef struct {
         group_t   group;
         channel_t channel;
+
+        bool is_ok()
+        {
+                if ((group != GROUP_A)   &&
+                    (group != GROUP_B)   &&
+                    (group != GROUP_NONE))
+                        return false;
+
+                if ((channel != CHANNEL_1) &&
+                    (channel != CHANNEL_2) &&
+                    (channel != CHANNEL_3) &&
+                    (channel != CHANNEL_4))
+                        return false;
+
+                return true;
+        }
 } status_t;
 
 status_t status_current;
@@ -532,15 +575,21 @@ void setup()
         (void) photodiode.get();
         ar0 = photodiode.get();
         
-        // Values to be stored on flash memory (later on)
-        status_current.group   = GROUP_A;
-        status_current.channel = CHANNEL_1;
+        //EEPROM_read<status_t>(0, status_current);
+        eeprom_read_block((void *) &status_current,
+                          (void *) 255,
+                          sizeof(status_t));
+        if (!status_current.is_ok()) {
+                LDBG("Wrong EEPROM values, restoring defaults");
+                status_current.group   = GROUP_A;
+                status_current.channel = CHANNEL_1;
+        }
 
         ui_battery.move (0, 0);
         ui_mode.move    (0, 0);
         ui_power.move   (0, 0);
         ui_channel.move (0, 0);
-        
+
 #if DEBUG
         if (lcd.width() <
             (ui_battery.width() +
@@ -666,6 +715,7 @@ void loop()
                 button_group.clicks() || button_channel.clicks();
 
         if (something_changed) {
+                //EEPROM_write<status_t>(0, status_current);
                 lcd_update();
         }
 }
