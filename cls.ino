@@ -95,7 +95,7 @@ public:
         //virtual ~digital_pin_output() { }
 
         virtual void setup()
-        { pinMode(pin_, INPUT); }
+        { pinMode(pin_, OUTPUT); }
 
         virtual void set(bool value)
         { digitalWrite(pin_, value ? HIGH : LOW); }
@@ -195,41 +195,44 @@ class led : private digital_pin_output {
 public:
         led(pin_t p) :
                 digital_pin_output(p),
-                state_(false)
+                state_current_(false),
+                state_previous_(false)
         { }
 
         //virtual ~led() { }
 
         virtual void setup()
+        { digital_pin_output::setup(); }
+
+        virtual void update()
         {
-                digital_pin_output::setup();
-                update();
+                if (state_current_ != state_previous_) {
+                        state_previous_ = state_current_;
+                        set(state_current_);
+                }
         }
 
         virtual void on()
         {
-                set(true);
-                state_ = true;
+                state_previous_ = state_current_;
+                state_current_  = true;
         }
 
         virtual void off()
         {
-                set(false);
-                state_ = false;
+                state_previous_ = state_current_;
+                state_current_  = false;
         }
-
+        
         virtual void flip()
         {
-                state_ = !state_;
-                update();
+                state_previous_ = state_current_;
+                state_current_  = !state_current_;
         }
 
 private:
-        pin_t pin_;
-        bool  state_;
-
-        virtual void update()
-        { if (state_) on(); else off(); }
+        bool state_current_;
+        bool state_previous_;
 };
 
 class bitmap {
@@ -330,9 +333,9 @@ private:
 
 class xsync : private digital_pin_output {
 public:
-        xsync(pin_t p, long delay = 15) :
+        xsync(pin_t p, unsigned int delay_us) :
                 digital_pin_output(p),
-                delay_(delay)
+                delay_(delay_us)
         { }
 
         virtual void setup()
@@ -346,7 +349,7 @@ public:
         }
 
 private:
-        long delay_;
+        unsigned int delay_;
 };
 
 typedef enum {
@@ -361,6 +364,13 @@ typedef enum {
         CHANNEL_3,
         CHANNEL_4
 } channel_t;
+
+typedef struct {
+        group_t   group;
+        channel_t channel;
+} status_t;
+
+status_t status_current;
 
 // 4 microsecond precision timing using 16MHz Arduino
 extern volatile unsigned long timer0_overflow_count;
@@ -383,10 +393,6 @@ int       ar0;              // Photodiode input
 int       pulse_count;      // Pulse count
 int       prev_pulse_count; // Pulses in previous pulse groups
 
-group_t   group;
-channel_t channel;
-int       threshold;
-
 icon             ui_battery (NULL, 0, 0);
 icon             ui_mode    (NULL, 0, 0);
 icon             ui_power   (NULL, 0, 0);
@@ -396,9 +402,40 @@ button           button_group(PIN_BUTTON_GROUP);
 button           button_channel(PIN_BUTTON_CHANNEL);
 led              led_status(PIN_LED);
 
-xsync            flash(PIN_XSYNC);
+#define XSYNC_DELAY 15 // us
+
+xsync            flash(PIN_XSYNC, XSYNC_DELAY);
 
 analog_pin_input photodiode(PIN_PHOTODIODE);
+
+void lcd_update()
+{
+
+#if DEBUG
+        CDBG("Current status -> ");
+
+        CDBG("G=");
+        switch (status_current.group) {
+        case GROUP_A:    CDBG("A"); break;
+        case GROUP_B:    CDBG("B"); break;
+        case GROUP_NONE: CDBG("-"); break;
+        default:                   break;
+        }
+
+        CDBG(" ");
+
+        CDBG("C=");
+        switch (status_current.channel) {
+        case CHANNEL_1: CDBG("1"); break;
+        case CHANNEL_2: CDBG("2"); break;
+        case CHANNEL_3: CDBG("3"); break;
+        case CHANNEL_4: CDBG("4"); break;
+        default:                   break;
+        }
+
+        LDBG("");
+#endif
+}
 
 void setup()
 {
@@ -438,9 +475,8 @@ void setup()
         ar0 = photodiode.get();
         
         // Values to be stored on flash memory (later on)
-        threshold = 50;
-        group     = GROUP_A;
-        channel   = CHANNEL_1;
+        status_current.group   = GROUP_A;
+        status_current.channel = CHANNEL_1;
 
         ui_battery.move (0, 0);
         ui_mode.move    (0, 0);
@@ -457,6 +493,7 @@ void setup()
 #endif
 
         LDBG("Ready");
+        lcd_update();
 }
 
 void loop_ui()
@@ -496,6 +533,7 @@ void loop_slave()
                 prev_pulse = now;
         }
 
+#if 0
         if (delta > threshold) {
                 // If the delay since the previous pulse is longer than
                 // 10000*4 microseconds (40ms)...
@@ -525,26 +563,17 @@ void loop_slave()
                 // Background. It should be zero most of the time
                 ar0 = new_ar;
         }
+#endif
 }
-
-void loop_status_led()
-{ led_status.flip(); }
-
-typedef struct {
-        group_t   group;
-        channel_t channel;
-} status_t;
-
-status_t status_current;
 
 void spin_group(size_t count)
 {
         for (size_t i = 0; i < count; i++) {
-                switch (group) {
-                case GROUP_A:    group = GROUP_B;    break;
-                case GROUP_B:    group = GROUP_NONE; break;
-                case GROUP_NONE: group = GROUP_A;    break;
-                default:                             break;
+                switch (status_current.group) {
+                case GROUP_A:    status_current.group = GROUP_B;    break;
+                case GROUP_B:    status_current.group = GROUP_NONE; break;
+                case GROUP_NONE: status_current.group = GROUP_A;    break;
+                default:                                            break;
                 }
         }
 }
@@ -552,57 +581,34 @@ void spin_group(size_t count)
 void spin_channel(size_t count)
 {
         for (size_t i = 0; i < count; i++) {
-                switch (channel) {
-                case CHANNEL_1: channel = CHANNEL_2; break;
-                case CHANNEL_2: channel = CHANNEL_3; break;
-                case CHANNEL_3: channel = CHANNEL_4; break;
-                case CHANNEL_4: channel = CHANNEL_1; break;
-                default:                             break;
+                switch (status_current.channel) {
+                case CHANNEL_1: status_current.channel = CHANNEL_2; break;
+                case CHANNEL_2: status_current.channel = CHANNEL_3; break;
+                case CHANNEL_3: status_current.channel = CHANNEL_4; break;
+                case CHANNEL_4: status_current.channel = CHANNEL_1; break;
+                default:                                            break;
                 }
         }
 }
 
-void lcd_update()
-{
-
-#if DEBUG
-        CDBG("Current status -> ");
-
-        CDBG("G=");
-        switch (group) {
-        case GROUP_A:    CDBG("A"); break;
-        case GROUP_B:    CDBG("B"); break;
-        case GROUP_NONE: CDBG("-"); break;
-        default:                   break;
-        }
-
-        CDBG(" ");
-
-        CDBG("C=");
-        switch (channel) {
-        case CHANNEL_1: CDBG("1"); break;
-        case CHANNEL_2: CDBG("2"); break;
-        case CHANNEL_3: CDBG("3"); break;
-        case CHANNEL_4: CDBG("4"); break;
-        default:                   break;
-        }
-
-        LDBG("");
-#endif
-}
-
 void loop()
 {
+        delay(10);
+
         //loop_slave();
         //loop_ui();
-        loop_status_led();
-
+        led_status.update();
         button_group.update();
         button_channel.update();
 
         spin_group(button_group.clicks());
         spin_channel(button_channel.clicks());
 
-        if (button_group.clicks() || button_channel.clicks())
+        bool something_changed =
+                button_group.clicks() || button_channel.clicks();
+
+        if (something_changed) {
                 lcd_update();
+                led_status.flip();
+        }
 }
