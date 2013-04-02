@@ -8,6 +8,11 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_PCD8544.h>
 
+//
+// Configurable values (to some extent ...)
+//
+
+// Pins allocation
 #define PIN_PHOTODIODE      0
 #define PIN_XSYNC           1
 
@@ -22,7 +27,10 @@
 #define PIN_LCD_CS          4 // LCD chip select     (CS)
 #define PIN_LCD_RST         3 // LCD reset           (RST)
 
-#define DEBUG 1
+// Miscellaneous
+#define XSYNC_DELAY        15 // us
+
+#define DEBUG               1
 
 #if DEBUG
 #define LDBG(FMT, ARG...) do { Serial.println(FMT, ##ARG); } while (0)
@@ -206,15 +214,15 @@ private:
         boolean state_last_;
 };
 
-class led : private digital_pin_output {
+class led_static : private digital_pin_output {
 public:
-        led(pin_t p) :
+        led_static(pin_t p) :
                 digital_pin_output(p),
                 state_current_(false),
                 state_previous_(false)
         { }
 
-        //virtual ~led() { }
+        //virtual ~led_static() { }
 
         virtual void setup()
         { digital_pin_output::setup(); }
@@ -248,6 +256,43 @@ public:
 private:
         bool state_current_;
         bool state_previous_;
+};
+
+class led_blinking : private led_static {
+public:
+        led_blinking(pin_t         p,
+                     unsigned long time_on,
+                     unsigned long time_off) :
+                led_static(p),
+                time_on_(time_on),
+                time_off_(time_off)
+        { }
+
+        //virtual ~led_blinking() { }
+
+        virtual void setup()
+        { led_static::setup(); }
+
+        virtual void change(unsigned long time_on,
+                            unsigned long time_off)
+        {
+                time_on_  = time_on;
+                time_off_ = time_off;
+        }
+
+        virtual void update()
+        {
+                unsigned long now = millis();
+                if (now % (time_on_ + time_off_) < time_on_)
+                        on();
+                else
+                        off();
+                led_static::update();
+        }
+
+private:
+        unsigned long time_on_;
+        unsigned long time_off_;
 };
 
 class bitmap {
@@ -415,9 +460,7 @@ icon             ui_channel (NULL, 0, 0);
 
 button           button_group(PIN_BUTTON_GROUP);
 button           button_channel(PIN_BUTTON_CHANNEL);
-led              led_status(PIN_LED);
-
-#define XSYNC_DELAY 15 // us
+led_blinking     led_status(PIN_LED, 10, 990);
 
 xsync            flash(PIN_XSYNC, XSYNC_DELAY);
 
@@ -624,6 +667,5 @@ void loop()
 
         if (something_changed) {
                 lcd_update();
-                led_status.flip();
         }
 }
