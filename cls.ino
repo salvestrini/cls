@@ -71,6 +71,21 @@ public:
         { return analogRead(pin_); }
 };
 
+class analog_pin_output : private pin {
+public:
+        analog_pin_input(pin_t p) :
+                pin(p)
+        { }
+
+        //virtual ~digital_pin_input() { }
+
+        virtual void setup()
+        { pinMode(pin_, OUTPUT); }
+
+        virtual void set(int value)
+        { return analogRead(pin_); }
+};
+
 class digital_pin_input : private pin {
 public:
         digital_pin_input(pin_t p) :
