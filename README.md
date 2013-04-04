@@ -11,3 +11,6 @@ http://legxaro.de/AWL/Code (git://github.com/polygon/awl.git)
 
 ## iTTL
 http://cms.diodenring.de/de/electronic/microcontroller/110-ittlanalysis
+
+## IR remote decoding
+https://github.com/shirriff/Arduino-IRremote

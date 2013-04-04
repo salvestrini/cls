@@ -415,30 +415,6 @@ private:
         unsigned int delay_;
 };
 
-#if 0
-//template <typename T> int EEPROM_write(int address, const T & value)
-//{
-//        const byte * p = (const byte *)(const void *) &value;
-//
-//        unsigned int i;
-//        for (i = 0; i < sizeof(value); i++)
-//                EEPROM.write(address++, *p++);
-//
-//        return i;
-//}
-//
-//template <typename T> int EEPROM_read(int address, T & value)
-//{
-//        byte* p = (byte *)(void *) &value;
-//
-//        unsigned int i;
-//        for (i = 0; i < sizeof(value); i++)
-//                *p++ = EEPROM.read(address++);
-//
-//        return i;
-//}
-#endif
-
 typedef enum {
         GROUP_A,
         GROUP_B,
@@ -452,9 +428,18 @@ typedef enum {
         CHANNEL_4
 } channel_t;
 
-typedef struct {
+typedef struct configuration {
         group_t   group;
         channel_t channel;
+
+        void reset()
+        {
+                group   = GROUP_A;
+                channel = CHANNEL_1;
+        }
+
+        configuration()
+        { reset(); }
 
         bool is_ok()
         {
@@ -471,9 +456,9 @@ typedef struct {
 
                 return true;
         }
-} status_t;
+} configuration_t;
 
-status_t status_current;
+configuration_t configuration_current;
 
 // 4 microsecond precision timing using 16MHz Arduino
 extern volatile unsigned long timer0_overflow_count;
@@ -516,7 +501,7 @@ void lcd_update()
         CDBG("Current status -> ");
 
         CDBG("G=");
-        switch (status_current.group) {
+        switch (configuration_current.group) {
         case GROUP_A:    CDBG("A"); break;
         case GROUP_B:    CDBG("B"); break;
         case GROUP_NONE: CDBG("-"); break;
@@ -526,7 +511,7 @@ void lcd_update()
         CDBG(" ");
 
         CDBG("C=");
-        switch (status_current.channel) {
+        switch (configuration_current.channel) {
         case CHANNEL_1: CDBG("1"); break;
         case CHANNEL_2: CDBG("2"); break;
         case CHANNEL_3: CDBG("3"); break;
@@ -575,14 +560,13 @@ void setup()
         (void) photodiode.get();
         ar0 = photodiode.get();
         
-        //EEPROM_read<status_t>(0, status_current);
-        eeprom_read_block((void *) &status_current,
-                          (void *) 255,
-                          sizeof(status_t));
-        if (!status_current.is_ok()) {
+        //EEPROM_read<configuration_t>(0, configuration_current);
+        eeprom_read_block((void *) &configuration_current,
+                          (void *) 0,
+                          sizeof(configuration_current));
+        if (!configuration_current.is_ok()) {
                 LDBG("Wrong EEPROM values, restoring defaults");
-                status_current.group   = GROUP_A;
-                status_current.channel = CHANNEL_1;
+                configuration_current.reset();
         }
 
         ui_battery.move (0, 0);
@@ -614,6 +598,62 @@ void loop_ui()
                 ui_power.draw();
         if (ui_channel.changed())
                 ui_channel.draw();
+}
+
+#define CODE_GROUP_A     0x9 // 1001
+#define CODE_GROUP_B     0xA // 1010
+#define CODE_GROUP_C     0xB // 1011
+
+#define CODE_CHANNEL_1
+#define CODE_CHANNEL_2
+#define CODE_CHANNEL_3
+#define CODE_CHANNEL_4
+
+#define CODE_COMMAND_OFF 0x8 // 1000
+#define CODE_COMMAND_TTL 0x9 // 1001
+#define CODE_COMMAND_AA  0xA // 1010
+#define CODE_COMMAND_M   0xB // 1011
+
+#define CODE_FLASH_POWER_1_1   0x01 // 00000001
+#define CODE_FLASH_POWER_1_2   0x0D // 00001101
+#define CODE_FLASH_POWER_1_4   0x19 // 00011001
+#define CODE_FLASH_POWER_1_8   0x25 // 00100101
+#define CODE_FLASH_POWER_1_16  0x31 // 00110001
+#define CODE_FLASH_POWER_1_32  0x3D // 00111101
+#define CODE_FLASH_POWER_1_64  0x49 // 01001001
+#define CODE_FLASH_POWER_1_128 0x55 // 01010101
+
+// Flash power #3 (FP sync)
+//   CMD = <CHN>1101<mmmm><bbbbbbbb>[<bbbbbbbb>[<bbbbbbbb>]]
+//
+//     mmmm = 1011 if shutter > 1/500s
+//     mmmm = 1100 if shutter < 1/500s
+void decode_command_flash_power_3()
+{ }
+
+// Flash power #2 (Rear-curtain sync)
+//   CMD = <CHN>0111<bbbbbbbb>[<bbbbbbbb>[<bbbbbbbb>]] + <CHN>0111
+void decode_command_flash_power_2()
+{ }
+
+// Flash power #1
+//   CMD = <CHN>0101<bbbbbbbb>[<bbbbbbbb>[<bbbbbbbb>]]
+void decode_command_flash_power_1()
+{ }
+
+// Pre-flash
+//   CMD = <CHN><gggg> + double-pulse
+void decode_command_pre_flash()
+{ }
+
+// Remote configuration
+//   CMD = <CHN>0110<gggg>[<gggg>[<gggg>]]
+void decode_command_remote_group_setting()
+{ }
+
+void parse_command()
+{
+        // Parse group
 }
 
 void loop_slave()
@@ -676,11 +716,18 @@ void loop_slave()
 void spin_group(size_t count)
 {
         for (size_t i = 0; i < count; i++) {
-                switch (status_current.group) {
-                case GROUP_A:    status_current.group = GROUP_B;    break;
-                case GROUP_B:    status_current.group = GROUP_NONE; break;
-                case GROUP_NONE: status_current.group = GROUP_A;    break;
-                default:                                            break;
+                switch (configuration_current.group) {
+                case GROUP_A:
+                        configuration_current.group = GROUP_B;
+                        break;
+                case GROUP_B:
+                        configuration_current.group = GROUP_NONE;
+                        break;
+                case GROUP_NONE:
+                        configuration_current.group = GROUP_A;
+                        break;
+                default:
+                        break;
                 }
         }
 }
@@ -688,12 +735,17 @@ void spin_group(size_t count)
 void spin_channel(size_t count)
 {
         for (size_t i = 0; i < count; i++) {
-                switch (status_current.channel) {
-                case CHANNEL_1: status_current.channel = CHANNEL_2; break;
-                case CHANNEL_2: status_current.channel = CHANNEL_3; break;
-                case CHANNEL_3: status_current.channel = CHANNEL_4; break;
-                case CHANNEL_4: status_current.channel = CHANNEL_1; break;
-                default:                                            break;
+                switch (configuration_current.channel) {
+                case CHANNEL_1: configuration_current.channel = CHANNEL_2;
+                        break;
+                case CHANNEL_2: configuration_current.channel = CHANNEL_3;
+                        break;
+                case CHANNEL_3: configuration_current.channel = CHANNEL_4;
+                        break;
+                case CHANNEL_4: configuration_current.channel = CHANNEL_1;
+                        break;
+                default:
+                        break;
                 }
         }
 }
@@ -715,7 +767,9 @@ void loop()
                 button_group.clicks() || button_channel.clicks();
 
         if (something_changed) {
-                //EEPROM_write<status_t>(0, status_current);
+                eeprom_write_block((void *) &configuration_current,
+                                   (void *) 0,
+                                   sizeof(configuration_current));
                 lcd_update();
         }
 }
