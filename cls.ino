@@ -556,10 +556,6 @@ void setup()
         led_status.setup();
         photodiode.setup();
 
-        // The first analog read always return 1023 so a dummy read is added
-        (void) photodiode.get();
-        ar0 = photodiode.get();
-        
         //EEPROM_read<configuration_t>(0, configuration_current);
         eeprom_read_block((void *) &configuration_current,
                           (void *) 0,
@@ -600,19 +596,19 @@ void loop_ui()
                 ui_channel.draw();
 }
 
-#define CODE_GROUP_A     0x9 // 1001
-#define CODE_GROUP_B     0xA // 1010
-#define CODE_GROUP_C     0xB // 1011
-
-#define CODE_CHANNEL_1
-#define CODE_CHANNEL_2
-#define CODE_CHANNEL_3
-#define CODE_CHANNEL_4
-
-#define CODE_COMMAND_OFF 0x8 // 1000
-#define CODE_COMMAND_TTL 0x9 // 1001
-#define CODE_COMMAND_AA  0xA // 1010
-#define CODE_COMMAND_M   0xB // 1011
+#define CODE_GROUP_A            0x9 // 1001
+#define CODE_GROUP_B            0xA // 1010
+#define CODE_GROUP_C            0xB // 1011
+                               
+#define CODE_CHANNEL_1         0xA4 // 10100100
+#define CODE_CHANNEL_2         0x94 // 10010100
+#define CODE_CHANNEL_3         0x92 // 10010010
+#define CODE_CHANNEL_4         0x91 // 10010001
+                               
+#define CODE_COMMAND_OFF        0x8 // 1000
+#define CODE_COMMAND_TTL        0x9 // 1001
+#define CODE_COMMAND_AA         0xA // 1010
+#define CODE_COMMAND_M          0xB // 1011
 
 #define CODE_FLASH_POWER_1_1   0x01 // 00000001
 #define CODE_FLASH_POWER_1_2   0x0D // 00001101
@@ -658,59 +654,6 @@ void parse_command()
 
 void loop_slave()
 {
-        int           new_ar, delta;
-        unsigned long now;
-
-        new_ar      = photodiode.get();
-        delta       = new_ar - ar0;
-        now         = hpticks();
-        time_passed = now - prev_pulse;
-
-        // Pulses come in bundles. The minimal seperation seems to be around
-        // 4000 us
-        if (pulse_count > 0 && time_passed > 1000) {
-                prev_pulse_count = pulse_count;
-                pulse_count      = 0;
-        }
-
-        // Reset if > 125000 * 4 = 500ms
-        if (time_passed > 125000) {
-                pulse_count = 0;
-                prev_pulse_count = 0;
-                prev_pulse = now;
-        }
-
-#if 0
-        if (delta > threshold) {
-                // If the delay since the previous pulse is longer than
-                // 10000*4 microseconds (40ms)...
-                        
-                // Checking the previous pulse group is needed to avoid
-                // mis-fire.
-                if ((time_passed > 10000) &&
-                    (prev_pulse_count == 1 || prev_pulse_count > 5)) {
-                        // Fire the flash now!
-                        flash.fire();
-                        
-                        // Reset the pulse counter
-                        pulse_count      = 0;
-                        prev_pulse_count = 0;
-                } else {
-                        // Get to the end of the pulse. Some pulses are
-                        // specially wide.
-                        while (photodiode.get() > threshold);
-                        
-                        // Increase the pulse count
-                        pulse_count++;
-                        
-                        // Keep track of the time a pulse is detected
-                        prev_pulse = now;
-                }
-        } else {
-                // Background. It should be zero most of the time
-                ar0 = new_ar;
-        }
-#endif
 }
 
 void spin_group(size_t count)
@@ -754,19 +697,18 @@ void loop()
 {
         delay(10);
 
-        //loop_slave();
         //loop_ui();
         led_status.update();
         button_group.update();
         button_channel.update();
 
-        spin_group(button_group.clicks());
-        spin_channel(button_channel.clicks());
+        int bg_clicks = button_group.clicks();
+        int bc_clicks = button_channel.clicks();
 
-        bool something_changed =
-                button_group.clicks() || button_channel.clicks();
+        spin_group(bg_clicks);
+        spin_channel(bc_clicks);
 
-        if (something_changed) {
+        if (bg_clicks || bc_clicks) {
                 eeprom_write_block((void *) &configuration_current,
                                    (void *) 0,
                                    sizeof(configuration_current));
