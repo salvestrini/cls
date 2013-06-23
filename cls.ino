@@ -11,6 +11,8 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_PCD8544.h>
 
+#define FIRMWARE_VERSION "0.1"
+
 //
 // Configurable values (to some extent ...)
 //
@@ -24,11 +26,11 @@
 #define PIN_BUTTON_GROUP    8
 #define PIN_BUTTON_CHANNEL  9
 
-#define PIN_LCD_SCLK        7 // Serial clock out    (SCLK)
-#define PIN_LCD_DIN         6 // Serial data out     (DIN)
-#define PIN_LCD_DC          5 // Data/command select (D/C)
-#define PIN_LCD_CS          4 // LCD chip select     (CS)
-#define PIN_LCD_RST         3 // LCD reset           (RST)
+#define PIN_LCD_SCLK        7 // Serial clock out            (SCLK)
+#define PIN_LCD_DIN         6 // Serial data out             (DIN)
+#define PIN_LCD_DC          5 // Data/command select         (D/C)
+#define PIN_LCD_CS          4 // LCD chip select/chip enable (CS/CE)
+#define PIN_LCD_RST         3 // LCD reset                   (RST)
 
 // Miscellaneous
 #define XSYNC_DELAY        15 // us
@@ -523,21 +525,38 @@ void lcd_update()
 #endif
 }
 
+void show_banner()
+{
+        lcd.clearDisplay();
+
+        lcd.setCursor(0, 0);
+
+        lcd.println("");
+        lcd.println("");
+        lcd.println(" Firmware");
+        lcd.println(" v" FIRMWARE_VERSION);
+        lcd.println("");
+        lcd.println("");
+
+        lcd.display();
+}
+
 void setup()
 {
 #if DEBUG
         Serial.begin(57600);
 #endif
-        lcd.begin();
-        lcd.setContrast(50);
-        lcd.clearDisplay();
 
+        LDBG("Initializing ...");
+
+        lcd.begin();
+
+        lcd.setContrast(50);
         lcd.setTextSize(1);
         lcd.setTextColor(BLACK);
         lcd.setTextWrap(false);
 
-        lcd.setCursor(0, 0);
-        lcd.println("Hello world");
+        show_banner();
 
         // Use internal reference voltage of 1.2v for ADC
         analogReference(INTERNAL);
@@ -697,7 +716,8 @@ void loop()
 {
         delay(10);
 
-        //loop_ui();
+        loop_ui();
+
         led_status.update();
         button_group.update();
         button_channel.update();
